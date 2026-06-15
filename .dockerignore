@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/coverage
+.git
+.github
+# Nota: NO excluyas apps/web — pnpm necesita su package.json para validar el
+# lockfile (--frozen-lockfile). Su node_modules ya se excluye arriba.
+# Nunca meter secretos en la imagen
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

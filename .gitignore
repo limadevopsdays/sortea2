@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+
+# env — ignora cualquier .env real (incl. .env.bak); solo se versionan los ejemplos
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# prisma
+apps/api/prisma/migrations/dev.db*

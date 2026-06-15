@@ -1,0 +1,115 @@
+name: Deploy (API → Railway, luego Web → Pages)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'packages/shared/**'
+              - 'railway.json'
+              - '.dockerignore'
+              - '.github/workflows/deploy.yml'
+            web:
+              - 'apps/web/**'
+              - 'packages/shared/**'
+              - '.github/workflows/deploy.yml'
+
+  deploy-api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Inyectar variables y secretos en Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway variables --service "${{ vars.RAILWAY_SERVICE }}" --skip-deploys \
+            --set "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+            --set "DIRECT_URL=${{ secrets.DIRECT_URL }}" \
+            --set "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            --set "ORGANIZER_KEY=${{ secrets.ORGANIZER_KEY }}" \
+            --set "SUPABASE_URL=${{ vars.SUPABASE_URL }}" \
+            --set "AVATAR_BUCKET=${{ vars.AVATAR_BUCKET }}" \
+            --set "CORS_ORIGINS=${{ vars.CORS_ORIGINS }}"
+
+      - name: Desplegar API a Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service "${{ vars.RAILWAY_SERVICE }}" --ci
+
+      - name: Esperar a que la API esté sana
+        run: |
+          for i in $(seq 1 36); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.VITE_API_URL }}/api/participants" || true)
+            echo "intento $i → HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 5
+          done
+          echo "::error::La API no respondió 200 a tiempo"; exit 1
+
+  deploy-web:
+    needs: [changes, deploy-api]
+    if: |
+      always() &&
+      (needs.changes.outputs.web == 'true' || github.event_name == 'workflow_dispatch') &&
+      needs.deploy-api.result != 'failure' &&
+      needs.deploy-api.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build web
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_PUBLIC_URL: ${{ vars.VITE_PUBLIC_URL }}
+
+        run: pnpm --filter @sortea2/shared build && pnpm --filter @sortea2/web build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

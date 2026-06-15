@@ -1,0 +1,67 @@
+// Prisma sobre el Postgres gestionado de Supabase.
+// - DATABASE_URL: pooler (6543, pgbouncer) que usa la app en runtime.
+// - DIRECT_URL:   conexión directa (5432) que Prisma usa para migraciones.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AvatarType {
+  emoji
+  photo
+}
+
+enum RaffleMode {
+  ruleta
+  cuys
+  slot
+  dardos
+  cartas
+  paracaidas
+  bracket
+  bola
+}
+
+model Participant {
+  id          String       @id @default(uuid()) @db.Uuid
+  /// orden de inscripción, autoincremental — es el "#0001" en pantalla
+  number      Int          @default(autoincrement())
+  name        String       @db.VarChar(60)
+  email       String       @unique @db.VarChar(120)
+  phone       String?      @db.VarChar(30)
+  avatarType  AvatarType
+  avatarValue String       @db.Text
+  createdAt   DateTime     @default(now())
+  wins        RaffleDraw[]
+
+  @@index([createdAt])
+  @@map("participants")
+}
+
+/// Estado del evento (fila única id=1). Al iniciar el sorteo se cierra el registro.
+model EventState {
+  id                 Int      @id @default(1)
+  registrationLocked Boolean  @default(false)
+  updatedAt          DateTime @updatedAt
+
+  @@map("event_state")
+}
+
+model RaffleDraw {
+  id          String      @id @default(uuid()) @db.Uuid
+  mode        RaffleMode
+  winner      Participant @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+  winnerId    String      @db.Uuid
+  /// índice del ganador dentro de la lista al momento del sorteo
+  winnerIndex Int
+  drawnAt     DateTime    @default(now())
+
+  @@index([drawnAt])
+  @@map("raffle_draws")
+}
